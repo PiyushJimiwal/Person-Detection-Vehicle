@@ -7,7 +7,7 @@
 pip install -r requirements.txt
 ```
 
-### 2. Run with Webcam
+### 2. Run with Webcam (Default: yolov8n.pt)
 ```powershell
 python person_detector.py --source 0
 ```
@@ -22,13 +22,25 @@ python person_detector.py --source "your_video.mp4"
 python person_detector.py --source "input.mp4" --output "output.mp4"
 ```
 
+### 5. Use Better Model for Higher Accuracy
+```powershell
+python person_detector.py --source 0 --model yolov8m.pt
+```
+
 ## Key Features
-- Person detection with YOLO
+- Person detection with YOLOv8 (Nano model by default)
 - Unique person IDs (Person 1, 2, 3...)
 - Confidence scores displayed
 - Real-time person counting
-- Bounding boxes with labels
+- Face/head region tracking
+- Bounding boxes with color-coded labels
 
-Press 'q' to quit while running.
+## Controls
+- Press **'q'** to quit while running
+
+## Model Options
+- `yolov8n.pt` - Fastest (default)
+- `yolov8m.pt` - Balanced accuracy/speed
+- `yolov8l.pt` - High accuracy
 
 See README.md for full documentation.

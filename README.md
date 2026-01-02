@@ -60,15 +60,17 @@ This will install:
 - `numpy` - Numerical computing
 - `torch` & `torchvision` - PyTorch (required by YOLO)
 
-### Step 4: Download YOLO Model
+### Step 4: YOLO Model
 
-The first time you run the script, it will automatically download the YOLOv8 model. You can choose different model sizes:
+The first time you run the script, it will automatically download the YOLOv8 model. The default model is **yolov8n.pt** (Nano - fastest, smallest). You can choose different model sizes based on your needs:
 
-- `yolov8n.pt` - Nano (fastest, least accurate) ~6MB
+- `yolov8n.pt` - Nano (fastest, smallest) ~6MB **[Default]**
 - `yolov8s.pt` - Small ~22MB
-- `yolov8m.pt` - Medium (default) ~52MB
+- `yolov8m.pt` - Medium (balanced) ~52MB
 - `yolov8l.pt` - Large ~87MB
 - `yolov8x.pt` - Extra Large (most accurate, slowest) ~136MB
+
+**Note:** Model files (*.pt) should not be committed to Git. They will be downloaded automatically on first run.
 
 ## Usage
 
@@ -92,8 +94,11 @@ python person_detector.py --source "C:\Videos\traffic_video.mp4"
 ### Option 3: Run with Custom Settings
 
 ```powershell
-# Use medium model with 60% confidence threshold
-python person_detector.py --source 0 --model yolov8m.pt --confidence 0.6
+# Use nano model (default) with 60% confidence threshold
+python person_detector.py --source 0 --confidence 0.6
+
+# Use medium model for better accuracy
+python person_detector.py --source 0 --model yolov8m.pt --confidence 0.5
 
 # Save output video
 python person_detector.py --source "input.mp4" --output "output.mp4"
@@ -186,12 +191,14 @@ person_detection_vehicle/
 │
 ├── person_detector.py      # Main detection script
 ├── config.py               # Configuration file
+├── example_usage.py        # Example usage script
 ├── requirements.txt        # Python dependencies
 ├── README.md              # Documentation (this file)
+├── QUICK_START.md         # Quick start guide
 │
-└── (models will be downloaded here automatically)
-    ├── yolov8n.pt
-    └── ...
+└── (models downloaded on first run - not in git)
+    ├── yolov8n.pt         # Downloaded automatically
+    └── (other models as needed)
 ```
 
 ## Use Cases
@@ -237,20 +244,20 @@ For issues or questions:
 ## Example Commands
 
 ```powershell
-# Basic webcam detection
+# Basic webcam detection (uses yolov8n.pt by default)
 python person_detector.py
-
-# High accuracy with medium model
-python person_detector.py --source 0 --model yolov8m.pt --confidence 0.6
 
 # Process video and save output
 python person_detector.py --source "input_video.mp4" --output "detected_output.mp4"
 
+# High accuracy with medium model
+python person_detector.py --source 0 --model yolov8m.pt --confidence 0.6
+
 # Background processing (no display)
 python person_detector.py --source "video.mp4" --output "result.mp4" --no-display
 
-# Low latency with nano model
-python person_detector.py --source 0 --model yolov8n.pt --confidence 0.4
+# Lower confidence for more detections
+python person_detector.py --source 0 --confidence 0.3
 ```
 
 ## Credits

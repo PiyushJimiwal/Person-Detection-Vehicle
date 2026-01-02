@@ -12,14 +12,14 @@ import time
 
 
 class PersonDetector:
-    def __init__(self, model_path='yolov8n.pt', confidence_threshold=0.5, use_fast_mode=True):
+    def __init__(self, model_path='yolov8n.pt', confidence_threshold=0.5, use_fast_mode=False):
         """
         Initialize the Person Detector
         
         Args:
             model_path: Path to YOLO model (yolov8n.pt, yolov8s.pt, yolov8m.pt, etc.)
             confidence_threshold: Minimum confidence score for detection (0-1)
-            use_fast_mode: Enable optimizations for faster processing
+            use_fast_mode: Enable optimizations for faster processing (slightly lower accuracy)
         """
         self.model = YOLO(model_path)
         self.confidence_threshold = confidence_threshold
@@ -111,7 +111,7 @@ class PersonDetector:
             return self._apply_cached_detections(annotated_frame)
         
         # Run YOLO detection with optimized settings
-        img_size = 416 if self.use_fast_mode else 640  # Smaller size = faster
+        img_size = 480 if self.use_fast_mode else 640  # Balanced size
         
         # Try to use GPU if available, otherwise use CPU
         import torch
