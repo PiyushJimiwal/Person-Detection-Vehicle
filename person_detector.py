@@ -12,19 +12,29 @@ import time
 
 
 class PersonDetector:
-    def __init__(self, model_path='yolov8n.pt', confidence_threshold=0.5):
+    def __init__(self, model_path='yolov8n.pt', confidence_threshold=0.5, use_fast_mode=True):
         """
         Initialize the Person Detector
         
         Args:
             model_path: Path to YOLO model (yolov8n.pt, yolov8s.pt, yolov8m.pt, etc.)
             confidence_threshold: Minimum confidence score for detection (0-1)
+            use_fast_mode: Enable optimizations for faster processing
         """
         self.model = YOLO(model_path)
         self.confidence_threshold = confidence_threshold
         self.person_count = 0
         self.tracked_persons = {}
         self.next_person_id = 1
+        self.use_fast_mode = use_fast_mode
+        self.frame_skip = 2 if use_fast_mode else 1  # Process every nth frame
+        self.frame_count_internal = 0
+        self.last_detections = []  # Cache last detections for skipped frames
+        
+        # Initialize face detector (Haar Cascade)
+        self.face_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+        )
         
         # Colors for bounding boxes (BGR format)
         self.colors = [
@@ -93,11 +103,32 @@ class PersonDetector:
             annotated_frame: Frame with bounding boxes and labels
             person_count: Number of persons detected in current frame
         """
-        # Run YOLO detection
-        results = self.model(frame, verbose=False)
-        
+        self.frame_count_internal += 1
         annotated_frame = frame.copy()
+        
+        # Skip frames in fast mode - use cached detections
+        if self.use_fast_mode and self.frame_count_internal % self.frame_skip != 0:
+            return self._apply_cached_detections(annotated_frame)
+        
+        # Run YOLO detection with optimized settings
+        img_size = 416 if self.use_fast_mode else 640  # Smaller size = faster
+        
+        # Try to use GPU if available, otherwise use CPU
+        import torch
+        device = 'cuda:0' if torch.cuda.is_available() and self.use_fast_mode else 'cpu'
+        use_half = torch.cuda.is_available() and self.use_fast_mode  # FP16 only works with CUDA
+        
+        results = self.model(
+            frame, 
+            verbose=False, 
+            imgsz=img_size, 
+            conf=self.confidence_threshold,
+            device=device,
+            half=use_half
+        )
+        
         current_frame_persons = []
+        self.last_detections = []  # Reset cache
         
         # Process detections
         for result in results:
@@ -114,6 +145,45 @@ class PersonDetector:
                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                     x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
                     
+                    # Extract person region for face detection
+                    person_roi = frame[y1:y2, x1:x2]
+                    
+                    # Detect face within person region with optimized parameters
+                    gray_roi = cv2.cvtColor(person_roi, cv2.COLOR_BGR2GRAY)
+                    # Apply histogram equalization for better face detection
+                    if not self.use_fast_mode:
+                        gray_roi = cv2.equalizeHist(gray_roi)
+                    
+                    # Faster face detection settings in fast mode
+                    scale = 1.2 if self.use_fast_mode else 1.05
+                    neighbors = 4 if self.use_fast_mode else 3
+                    min_size = (30, 30) if self.use_fast_mode else (20, 20)
+                    
+                    faces = self.face_cascade.detectMultiScale(
+                        gray_roi, 
+                        scaleFactor=scale,
+                        minNeighbors=neighbors,
+                        minSize=min_size,
+                        flags=cv2.CASCADE_SCALE_IMAGE
+                    )
+                    
+                    # Use face coordinates if detected, otherwise use upper 30% of person box
+                    if len(faces) > 0:
+                        # Use the first (largest) detected face
+                        fx, fy, fw, fh = faces[0]
+                        # Convert face coordinates to frame coordinates
+                        face_x1 = x1 + fx
+                        face_y1 = y1 + fy
+                        face_x2 = face_x1 + fw
+                        face_y2 = face_y1 + fh
+                    else:
+                        # Fallback: use upper 30% of person bounding box (head region)
+                        box_height = y2 - y1
+                        face_x1 = x1
+                        face_y1 = y1
+                        face_x2 = x2
+                        face_y2 = y1 + int(box_height * 0.3)
+                    
                     # Assign person ID
                     person_id = self.assign_person_id((x1, y1, x2, y2))
                     current_frame_persons.append(person_id)
@@ -121,8 +191,16 @@ class PersonDetector:
                     # Select color based on person ID
                     color = self.colors[person_id % len(self.colors)]
                     
-                    # Draw bounding box
-                    cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
+                    # Cache detection for frame skipping
+                    self.last_detections.append({
+                        'box': (face_x1, face_y1, face_x2, face_y2),
+                        'person_id': person_id,
+                        'confidence': confidence,
+                        'color': color
+                    })
+                    
+                    # Draw bounding box around face/head region only
+                    cv2.rectangle(annotated_frame, (face_x1, face_y1), (face_x2, face_y2), color, 2)
                     
                     # Create label with person ID and confidence
                     label = f"Person {person_id}: {confidence:.2f}"
@@ -135,8 +213,8 @@ class PersonDetector:
                     # Draw label background
                     cv2.rectangle(
                         annotated_frame,
-                        (x1, y1 - label_height - 10),
-                        (x1 + label_width, y1),
+                        (face_x1, face_y1 - label_height - 10),
+                        (face_x1 + label_width, face_y1),
                         color,
                         -1
                     )
@@ -145,7 +223,7 @@ class PersonDetector:
                     cv2.putText(
                         annotated_frame,
                         label,
-                        (x1, y1 - 5),
+                        (face_x1, face_y1 - 5),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.6,
                         (255, 255, 255),
@@ -169,6 +247,56 @@ class PersonDetector:
         )
         
         return annotated_frame, self.person_count
+    
+    def _apply_cached_detections(self, frame):
+        """Apply cached detections to skipped frames for speed"""
+        annotated_frame = frame.copy()
+        
+        for detection in self.last_detections:
+            face_x1, face_y1, face_x2, face_y2 = detection['box']
+            person_id = detection['person_id']
+            confidence = detection['confidence']
+            color = detection['color']
+            
+            # Draw bounding box
+            cv2.rectangle(annotated_frame, (face_x1, face_y1), (face_x2, face_y2), color, 2)
+            
+            # Draw label
+            label = f"Person {person_id}: {confidence:.2f}"
+            (label_width, label_height), baseline = cv2.getTextSize(
+                label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2
+            )
+            cv2.rectangle(
+                annotated_frame,
+                (face_x1, face_y1 - label_height - 10),
+                (face_x1 + label_width, face_y1),
+                color,
+                -1
+            )
+            cv2.putText(
+                annotated_frame,
+                label,
+                (face_x1, face_y1 - 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                2
+            )
+        
+        # Display person count
+        count_text = f"Total Persons: {len(self.last_detections)}"
+        cv2.rectangle(annotated_frame, (10, 10), (300, 50), (0, 0, 0), -1)
+        cv2.putText(
+            annotated_frame,
+            count_text,
+            (20, 35),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (0, 255, 0),
+            2
+        )
+        
+        return annotated_frame, len(self.last_detections)
     
     def process_video(self, video_source, output_path=None, display=True):
         """
