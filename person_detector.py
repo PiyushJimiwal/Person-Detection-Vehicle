@@ -21,7 +21,16 @@ class PersonDetector:
             confidence_threshold: Minimum confidence score for detection (0-1)
             use_fast_mode: Enable optimizations for faster processing (slightly lower accuracy)
         """
+        # Check for GPU availability
+        import torch
+        self.device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+        self.use_half = torch.cuda.is_available()  # FP16 only works with CUDA
+        
+        # Load model with optimizations
         self.model = YOLO(model_path)
+        if self.use_half:
+            self.model.to(self.device)
+        
         self.confidence_threshold = confidence_threshold
         self.person_count = 0
         self.tracked_persons = {}
@@ -84,10 +93,10 @@ class PersonDetector:
         # Update tracking
         self.tracked_persons[assigned_id] = (box, time.time())
         
-        # Remove old tracked persons (not seen for 2 seconds)
+        # Remove old tracked persons (not seen for 1.5 seconds)
         current_time = time.time()
         for person_id, (_, last_seen) in list(self.tracked_persons.items()):
-            if current_time - last_seen > 2.0:
+            if current_time - last_seen > 1.5:
                 del self.tracked_persons[person_id]
         
         return assigned_id
@@ -111,20 +120,17 @@ class PersonDetector:
             return self._apply_cached_detections(annotated_frame)
         
         # Run YOLO detection with optimized settings
-        img_size = 480 if self.use_fast_mode else 640  # Balanced size
-        
-        # Try to use GPU if available, otherwise use CPU
-        import torch
-        device = 'cuda:0' if torch.cuda.is_available() and self.use_fast_mode else 'cpu'
-        use_half = torch.cuda.is_available() and self.use_fast_mode  # FP16 only works with CUDA
+        img_size = 512  # Optimized size for speed/accuracy balance
         
         results = self.model(
             frame, 
             verbose=False, 
             imgsz=img_size, 
             conf=self.confidence_threshold,
-            device=device,
-            half=use_half
+            device=self.device,
+            half=self.use_half,
+            agnostic_nms=True,  # Faster NMS
+            max_det=50  # Limit max detections for speed
         )
         
         current_frame_persons = []
@@ -150,14 +156,11 @@ class PersonDetector:
                     
                     # Detect face within person region with optimized parameters
                     gray_roi = cv2.cvtColor(person_roi, cv2.COLOR_BGR2GRAY)
-                    # Apply histogram equalization for better face detection
-                    if not self.use_fast_mode:
-                        gray_roi = cv2.equalizeHist(gray_roi)
                     
-                    # Faster face detection settings in fast mode
-                    scale = 1.2 if self.use_fast_mode else 1.05
-                    neighbors = 4 if self.use_fast_mode else 3
-                    min_size = (30, 30) if self.use_fast_mode else (20, 20)
+                    # Faster face detection settings
+                    scale = 1.15
+                    neighbors = 4
+                    min_size = (25, 25)
                     
                     faces = self.face_cascade.detectMultiScale(
                         gray_roi, 
@@ -424,6 +427,11 @@ def main():
         action='store_true',
         help='Disable video display window'
     )
+    parser.add_argument(
+        '--fast',
+        action='store_true',
+        help='Enable fast mode for higher FPS (with frame skipping)'
+    )
     
     args = parser.parse_args()
     
@@ -432,9 +440,11 @@ def main():
     
     # Initialize detector
     print(f"Initializing Person Detector with model: {args.model}")
+    print(f"Fast mode: {'Enabled' if args.fast else 'Disabled'}")
     detector = PersonDetector(
         model_path=args.model,
-        confidence_threshold=args.confidence
+        confidence_threshold=args.confidence,
+        use_fast_mode=args.fast
     )
     
     # Process video
